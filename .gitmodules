@@ -1,0 +1,6 @@
+[submodule "deps/nanovg"]
+	path = deps/nanovg
+	url = https://github.com/memononen/nanovg
+[submodule "deps/layout"]
+	path = deps/layout
+	url = https://github.com/randrew/layout
