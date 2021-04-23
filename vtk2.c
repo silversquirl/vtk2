@@ -26,6 +26,60 @@
 #include "vtk2.h"
 #include "deps/nanovg/src/nanovg_gl.h"
 
+
+
+//// Event handlers ////
+void _vtk2_ev_button(GLFWwindow *glfw_win, int button, int action, int mods) {
+	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
+}
+void _vtk2_ev_enter(GLFWwindow *glfw_win, int entered) {
+	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
+}
+void _vtk2_ev_key(GLFWwindow *glfw_win, int key, int scan, int action, int mods) {
+	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
+}
+void _vtk2_ev_mouse(GLFWwindow *glfw_win, double x, double y) {
+	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
+}
+void _vtk2_ev_resize(GLFWwindow *glfw_win, int fb_w, int fb_h) {
+	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
+
+	// Damage window
+	win->damaged = 1;
+
+	// Store framebuffer dimensions
+	win->fb_w = fb_w;
+	win->fb_h = fb_h;
+
+	// Store window dimensions
+	int w, h;
+	glfwGetWindowSize(win->win, &w, &h);
+	win->win_w = w;
+	win->win_h = h;
+
+	// Set OpenGL viewport
+	glViewport(0, 0, win->fb_w, win->fb_h);
+
+	// Resize root block
+	lay_set_size_xy(&win->lay, 0, win->win_w, win->win_h);
+}
+
+//// Drawing ////
+void _vtk2_window_draw(struct vtk2_win *win) {
+	if (!win->damaged) return;
+	win->damaged = 0;
+
+	// Calculate block layout
+	lay_run_context(&win->lay);
+
+	glClearColor(0, 0, 0, 0);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	// TODO: draw blocks
+
+	glfwSwapBuffers(win->win);
+}
+
 //// Error handling ////
 const char *vtk2_strerror(enum vtk2_err err) {
 	switch (err) {
@@ -63,26 +117,56 @@ enum vtk2_err vtk2_window_init(struct vtk2_win *win, const char *title, int w, i
 }
 
 enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) {
+	// Start damaged, since we've not drawn anything yet
+	win->damaged = 1;
+
+	// Setup window
 	win->win = glfw_win;
+	glfwSetWindowUserPointer(win->win, win);
 	glfwMakeContextCurrent(win->win);
 
+	// Create nanovg context
 	win->vg = nvgCreate(0);
 	if (!win->vg) {
 		return VTK2_ERR_ALLOC;
 	}
 
-	lay_init_context(&win->ctx);
-	lay_reserve_items_capacity(&win->ctx, 32);
-	if (!win->ctx.items) {
+	// Create layout context
+	lay_init_context(&win->lay);
+	lay_reserve_items_capacity(&win->lay, 32);
+	if (!win->lay.items) {
 		nvgDelete(win->vg);
 		return VTK2_ERR_ALLOC;
 	}
+
+	// Create root block
+	lay_item(&win->lay);
+
+	// Set up event handlers
+	glfwSetCursorEnterCallback(win->win, _vtk2_ev_enter);
+	glfwSetCursorPosCallback(win->win, _vtk2_ev_mouse);
+	glfwSetFramebufferSizeCallback(win->win, _vtk2_ev_resize);
+	glfwSetKeyCallback(win->win, _vtk2_ev_key);
+	glfwSetMouseButtonCallback(win->win, _vtk2_ev_button);
+
+	// Set initial size
+	int fb_w, fb_h;
+	glfwGetFramebufferSize(win->win, &fb_w, &fb_h);
+	_vtk2_ev_resize(win->win, fb_w, fb_h);
 
 	return 0;
 }
 
 void vtk2_window_deinit(struct vtk2_win *win) {
-	lay_destroy_context(&win->ctx);
+	lay_destroy_context(&win->lay);
 	nvgDelete(win->vg);
 	glfwDestroyWindow(win->win);
+}
+
+//// Main loop ////
+void vtk2_window_mainloop(struct vtk2_win *win) {
+	while (!glfwWindowShouldClose(win->win)) {
+		_vtk2_window_draw(win);
+		glfwWaitEvents();
+	}
 }

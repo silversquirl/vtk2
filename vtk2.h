@@ -1,13 +1,13 @@
 // USAGE NOTES:
 //
-// - You must manually call glfwTerminate() at the end of your program
+// - You must manually call glfwTerminate() at the end of your program.
 //
 // - Most functions return an error code. This will be 0 if no error
-//   occurred, or a positive integer otherwise
+//   occurred, or a positive integer otherwise.
 // 
-// - Though the contents of the vtk2_win struct are public, you probably
-//   shouldn't mess with anything other than the GLFW window unless you
-//   really know what you're doing
+// - Though the contents of the vtk2_win struct are public, this is primarily
+//   to allow using struct vtk2_win as a value type. You shouldn't mess with
+//   anything it contains unless you really know what you're doing.
 //
 
 #ifndef VTK2_H
@@ -28,11 +28,7 @@ const char *vtk2_strerror(enum vtk2_err err);
 // Print a string message for the specified error to stderr, preceded by the prefix and a colon
 void vtk2_perror(const char *prefix, enum vtk2_err err);
 
-struct vtk2_win {
-	lay_context ctx;
-	NVGcontext *vg;
-	GLFWwindow *win;
-};
+struct vtk2_win;
 
 // Create a new window with the specified title, width and height
 // Some default GLFW window hints will be set.
@@ -51,5 +47,18 @@ enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win);
 
 // Destroy the specified window, cleaning up all resources associated with it
 void vtk2_window_deinit(struct vtk2_win *win);
+
+// Process events and redraws for the specified window until it is closed
+void vtk2_window_mainloop(struct vtk2_win *win);
+
+struct vtk2_win {
+	lay_context lay;
+	NVGcontext *vg;
+	GLFWwindow *win;
+
+	_Bool damaged;
+	unsigned fb_w, fb_h;
+	float win_w, win_h;
+};
 
 #endif

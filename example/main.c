@@ -8,6 +8,8 @@ int main() {
 		return 1;
 	};
 
+	vtk2_window_mainloop(&win);
+
 	vtk2_window_deinit(&win);
 	glfwTerminate();
 
