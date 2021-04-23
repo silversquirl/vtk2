@@ -23,14 +23,15 @@ enum vtk2_err {
 	VTK2_ERR_PLATFORM, // GLFW platform error
 };
 
-// Return a string message for the specified error code
+// Return a string message for the specified error code.
 const char *vtk2_strerror(enum vtk2_err err);
-// Print a string message for the specified error to stderr, preceded by the prefix and a colon
+// Print a string message for the specified error to stderr, preceded by the prefix and a colon.
 void vtk2_perror(const char *prefix, enum vtk2_err err);
 
 struct vtk2_win;
+struct vtk2_block;
 
-// Create a new window with the specified title, width and height
+// Create a new window with the specified title, width and height.
 // Some default GLFW window hints will be set.
 // If you want to change these, use vtk2_window_init_glfw instead.
 // - GLFW_RESIZABLE = GLFW_TRUE
@@ -41,24 +42,51 @@ struct vtk2_win;
 enum vtk2_err vtk2_window_init(struct vtk2_win *win, const char *title, int w, int h);
 
 // Create a new window from an existing GLFW window.
-// If this function succeeds, the GLFW window will become owned by the vtk2 window,
+// If this function succeeds, the GLFW window becomes owned by the vtk2 window,
 // and should not be destroyed except through vtk2_window_deinit.
 enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win);
 
-// Destroy the specified window, cleaning up all resources associated with it
+// Destroy the specified window, cleaning up all resources associated with it.
 void vtk2_window_deinit(struct vtk2_win *win);
 
-// Process events and redraws for the specified window until it is closed
+// Initialize a block and set it as the root block of the specified window.
+// If this function succeeds, the block becomes owned by the window.
+enum vtk2_err vtk2_window_set_root(struct vtk2_win *win, struct vtk2_block *root);
+
+// Initialize a block and add it as a child of the specified parent.
+// If this function succeeds, the block becomes owned by the window.
+enum vtk2_err vtk2_window_add_child(struct vtk2_win *win, struct vtk2_block *parent, struct vtk2_block *child);
+
+// Process events and redraws for the specified window until it is closed.
 void vtk2_window_mainloop(struct vtk2_win *win);
 
 struct vtk2_win {
+	// Try not to mess with these directly
+	_Bool damaged; // Does the window need redrawn?
 	lay_context lay;
 	NVGcontext *vg;
 	GLFWwindow *win;
 
-	_Bool damaged;
-	unsigned fb_w, fb_h;
-	float win_w, win_h;
+	// Definitely don't touch these
+	float cx, cy; // Cursor pos
+	unsigned fb_w, fb_h; // Framebuffer size
+	float win_w, win_h; // Window size
+	struct vtk2_block *root, *focused;
+};
+
+struct vtk2_block {
+	// Only touch this stuff if you're defining custom block types
+	enum vtk2_err (*init)(struct vtk2_win *, struct vtk2_block *);
+	void (*deinit)(struct vtk2_block *);
+
+	_Bool (*ev_button)(struct vtk2_block *, int button, int action, int mods);
+	_Bool (*ev_enter)(struct vtk2_block *, _Bool entered);
+	_Bool (*ev_key)(struct vtk2_block *, int key, int scancode, int action, int mods);
+	_Bool (*ev_mouse)(struct vtk2_block *, float new_x, float new_y, float old_x, float old_y);
+	_Bool (*ev_text)(struct vtk2_block *, unsigned rune);
+
+	// Internal, don't touch
+	lay_id _id;
 };
 
 #endif
