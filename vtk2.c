@@ -32,6 +32,10 @@ static void _vtk2_ev_button(GLFWwindow *glfw_win, int button, int action, int mo
 		win->root->ev_button(win->root, button, action, mods);
 	}
 }
+static void _vtk2_ev_damage(GLFWwindow *glfw_win) {
+	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
+	win->damaged = 1;
+}
 static void _vtk2_ev_enter(GLFWwindow *glfw_win, int entered) {
 	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
 	if (win->root && win->root->ev_enter) {
@@ -161,6 +165,7 @@ enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) 
 	glfwSetFramebufferSizeCallback(win->win, _vtk2_ev_resize);
 	glfwSetKeyCallback(win->win, _vtk2_ev_key);
 	glfwSetMouseButtonCallback(win->win, _vtk2_ev_button);
+	glfwSetWindowRefreshCallback(win->win, _vtk2_ev_damage);
 
 	// Set initial size
 	int fb_w, fb_h;
