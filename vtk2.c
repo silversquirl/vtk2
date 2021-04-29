@@ -4,9 +4,6 @@
 #include <epoxy/gl.h>
 #include <GLFW/glfw3.h>
 
-#define LAY_IMPLEMENTATION
-#define LAY_FLOAT 1
-
 #if defined(NANOVG_GL2_IMPLEMENTATION) 
 #	define NVG_IMPL GL2 
 #elif defined(NANOVG_GLES2_IMPLEMENTATION)
@@ -24,7 +21,9 @@
 #define nvgDelete SPLAT(nvgDelete, NVG_IMPL)
 
 #include "vtk2.h"
+#include "deps/FlexLayout/src/FlexLayout.c"
 #include "deps/nanovg/src/nanovg_gl.h"
+#include "deps/nanovg/src/nanovg.c"
 
 //// Event handlers ////
 static void _vtk2_ev_button(GLFWwindow *glfw_win, int button, int action, int mods) {
@@ -68,11 +67,6 @@ static void _vtk2_ev_resize(GLFWwindow *glfw_win, int fb_w, int fb_h) {
 	glfwGetWindowSize(win->win, &w, &h);
 	win->win_w = w;
 	win->win_h = h;
-
-	// Resize root block
-	if (win->lay.count > 0) {
-		lay_set_size_xy(&win->lay, 0, win->win_w, win->win_h);
-	}
 }
 static void _vtk2_ev_text(GLFWwindow *glfw_win, unsigned rune) {
 	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
@@ -86,13 +80,17 @@ static void _vtk2_window_draw(struct vtk2_win *win) {
 	if (!win->damaged) return;
 	win->damaged = 0;
 
+	float fb_scale = win->win_w / (float)win->fb_w;
+
 	// Calculate block layout
-	lay_run_context(&win->lay);
+	if (win->root) {
+		Flex_layout(win->root->flex, win->win_w, win->win_h, fb_scale);
+	}
 
 	glViewport(0, 0, win->fb_w, win->fb_h);
 	glClearColor(0, 0, 0, 0);
 	glClear(GL_COLOR_BUFFER_BIT);
-	nvgBeginFrame(win->vg, win->win_w, win->win_h, win->win_w / (float)win->fb_w);
+	nvgBeginFrame(win->vg, win->win_w, win->win_h, fb_scale);
 
 	if (win->root && win->root->draw) {
 		win->root->draw(win->root);
@@ -153,8 +151,9 @@ enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) 
 		return VTK2_ERR_ALLOC;
 	}
 
-	// Create layout context
-	lay_init_context(&win->lay);
+	// Initialize internal properties
+	win->cy = win->cx = NAN;
+	win->root = win->focused = NULL;
 
 	// Set up event handlers
 	glfwSetCursorEnterCallback(win->win, _vtk2_ev_enter);
@@ -168,44 +167,34 @@ enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) 
 	glfwGetFramebufferSize(win->win, &fb_w, &fb_h);
 	_vtk2_ev_resize(win->win, fb_w, fb_h);
 
-	// Initialize internal properties
-	win->cy = win->cx = NAN;
-	win->root = win->focused = NULL;
-
 	return 0;
 }
 
+static void _vtk2_block_deinit(struct vtk2_block *block) {
+	if (!block) return;
+	if (block->deinit) block->deinit(block);
+	Flex_freeNodeRecursive(block->flex);
+}
+
 void vtk2_window_deinit(struct vtk2_win *win) {
-	if (win->root && win->root->deinit) {
-		win->root->deinit(win->root);
-	}
-	lay_destroy_context(&win->lay);
+	_vtk2_block_deinit(win->root);
 	nvgDelete(win->vg);
 	glfwDestroyWindow(win->win);
 }
 
-static lay_id _vtk2_lay_item(lay_context *lay) {
-	// We don't allow lay_item to allocate because it doesn't handle malloc failure properly
-	// Instead, we check the capacity manually, reserve a new capacity, then check if `items` is NULL
-	if (lay->count >= lay->capacity) {
-		lay_context backup = *lay;
-		lay_reserve_items_capacity(lay, lay->capacity ? lay->capacity * 4 : 32);
-		if (!lay->items) {
-			// Restore backup and return error value
-			*lay = backup;
-			return -1;
-		}
-	}
-
-	return lay_item(lay);
-}
-
-enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block) {
+static enum vtk2_err _vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block) {
 	block->win = win;
 
-	lay_set_behave(&win->lay, block->_id, block->flags);
-	lay_set_margins(&win->lay, block->_id, block->margins);
-	lay_set_size(&win->lay, block->_id, block->size);
+	Flex_setFlexGrow(block->flex, block->grow);
+	Flex_setFlexShrink(block->flex, block->shrink);
+
+	Flex_setMarginTop(block->flex, block->margins[0]);
+	Flex_setMarginRight(block->flex, block->margins[1]);
+	Flex_setMarginBottom(block->flex, block->margins[2]);
+	Flex_setMarginLeft(block->flex, block->margins[3]);
+
+	Flex_setWidth(block->flex, block->size[0]);
+	Flex_setHeight(block->flex, block->size[1]);
 
 	enum vtk2_err err = 0;
 	if (block->init) {
@@ -215,39 +204,35 @@ enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block) {
 }
 
 enum vtk2_err vtk2_window_set_root(struct vtk2_win *win, struct vtk2_block *root) {
-	if (win->root && win->root->deinit) {
-		win->root->deinit(win->root);
-	}
+	_vtk2_block_deinit(win->root);
 
-	// Reset layout context
-	lay_reset_context(&win->lay);
-
-	// Create root block in layout
-	root->_id = _vtk2_lay_item(&win->lay);
-	if (root->_id == -1) return VTK2_ERR_ALLOC;
-	lay_set_size_xy(&win->lay, root->_id, win->win_w, win->win_h);
+	// Create flex node
+	root->flex = Flex_newNode();
+	// FIXME: FlexLayout does not handle malloc failure, and will segfault before this check
+	if (!root->flex) return VTK2_ERR_ALLOC;
 
 	// Initialize root block
-	enum vtk2_err err = vtk2_block_init(win, root);
+	enum vtk2_err err = _vtk2_block_init(win, root);
 	if (err == 0) {
 		win->root = root;
 	}
+
 	return err;
 }
 
 enum vtk2_err vtk2_window_add_child(struct vtk2_win *win, struct vtk2_block *parent, struct vtk2_block *child) {
-	child->_id = _vtk2_lay_item(&win->lay);
-	if (child->_id == -1) return VTK2_ERR_ALLOC;
+	// Create flex node
+	child->flex = Flex_newNode();
+	// FIXME: FlexLayout does not handle malloc failure, and will segfault before this check
+	if (!child->flex) return VTK2_ERR_ALLOC;
 
 	// Initialize the block
-	enum vtk2_err err = vtk2_block_init(win, child);
+	enum vtk2_err err = _vtk2_block_init(win, child);
 	if (err) {
 		return err;
 	}
 
-	// TODO: allow appending 'cause that's faster
-	// For now tho, O(n^2) layout construction probably doesn't really matter
-	lay_insert(&win->lay, parent->_id, child->_id);
+	Flex_addChild(parent->flex, child->flex);
 
 	return 0;
 }
@@ -263,8 +248,9 @@ void vtk2_window_mainloop(struct vtk2_win *win) {
 //// Box block ////
 enum vtk2_err _vtk2_box_init(struct vtk2_block *base) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
+	Flex_setDirection(box->base.flex, (FlexDirection)box->direction);
 	for (struct vtk2_block **child = box->children; child && *child; child++) {
-		enum vtk2_err err = vtk2_block_init(box->base.win, *child);
+		enum vtk2_err err = vtk2_window_add_child(box->base.win, &box->base, *child);
 		if (err) return err;
 	}
 	return 0;
@@ -279,15 +265,36 @@ void _vtk2_box_deinit(struct vtk2_block *base) {
 	}
 }
 
+#ifdef VTK2_BOX_DEBUG
+// SplitMix64
+static uint64_t splitmix64(uint64_t x) {
+	x += 0x9e3779b97f4a7c15;
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9;
+	x = (x ^ (x >> 27)) * 0x94d049bb133111eb;
+	return x ^ (x >> 31);
+}
+#endif
+
 void _vtk2_box_draw(struct vtk2_block *base) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 
 #ifdef VTK2_BOX_DEBUG
 	struct vtk2_win *win = box->base.win;
-	lay_vec4 rect = lay_get_rect(&win->lay, box->base._id);
+	float rect[4] = {
+		Flex_getResultLeft(box->base.flex),
+		Flex_getResultTop(box->base.flex),
+		Flex_getResultWidth(box->base.flex),
+		Flex_getResultHeight(box->base.flex),
+	};
+	uint64_t color = splitmix64((uint64_t)box->base.flex);
+	uint8_t r = (color >> 0) & 0xff;
+	uint8_t g = (color >> 8) & 0xff;
+	uint8_t b = (color >> 16) & 0xff;
+	uint8_t a = (color >> 24) & 0xff;
+
 	nvgBeginPath(win->vg);
 	nvgRect(win->vg, rect[0], rect[1], rect[2], rect[3]);
-	nvgFillColor(win->vg, nvgRGBA(255, 192, 0, 192));
+	nvgFillColor(win->vg, nvgRGBA(r, g, b, a));
 	nvgFill(win->vg);
 	nvgStrokeColor(win->vg, nvgRGBA(255, 255, 255, 255));
 	nvgStrokeWidth(win->vg, 3);
@@ -303,12 +310,10 @@ void _vtk2_box_draw(struct vtk2_block *base) {
 
 struct vtk2_block *_vtk2_box_child(struct vtk2_b_box *box, float x, float y) {
 	for (struct vtk2_block **child = box->children; child && *child; child++) {
-		lay_vec4 rect = lay_get_rect(&box->base.win->lay, (*child)->_id);
-
-		float x0 = rect[0];
-		float y0 = rect[1];
-		float x1 = x0 + rect[2];
-		float y1 = y0 + rect[3];
+		float x0 = Flex_getResultLeft((*child)->flex);
+		float y0 = Flex_getResultTop((*child)->flex);
+		float x1 = x0 + Flex_getResultWidth((*child)->flex);
+		float y1 = y0 + Flex_getResultHeight((*child)->flex);
 
 		if (x0 <= x && x < x1 && y0 <= y && y < y1) {
 			return *child;
@@ -376,17 +381,21 @@ _Bool _vtk2_box_ev_text(struct vtk2_block *base, unsigned rune) {
 	return false;
 }
 
-#undef vtk2_make_box
-struct vtk2_block *vtk2_make_box(struct vtk2_box_settings settings, struct vtk2_block **children) {
+#define unpack_4(a) (a)[0], unpack_3((a)+1)
+#define unpack_3(a) (a)[0], unpack_2((a)+1)
+#define unpack_2(a) (a)[0], (a)[1]
+
+struct vtk2_block *_vtk2_make_box(struct vtk2_box_settings settings) {
 	struct vtk2_b_box *box = malloc(sizeof *box);
 	if (!box) abort();
 	*box = (struct vtk2_b_box){
-		.box_flags = settings.box_flags,
-		.children = children,
+		.children = settings.children,
+		.direction = settings.direction,
 		.base = (struct vtk2_block){
-			.flags = settings.layout_flags,
-			.margins = settings.margins,
-			.size = settings.size,
+			.grow = settings.grow,
+			.shrink = settings.shrink,
+			.margins = {unpack_4(settings.margins)},
+			.size = {unpack_2(settings.size)},
 
 			.init = _vtk2_box_init,
 			.deinit = _vtk2_box_deinit,

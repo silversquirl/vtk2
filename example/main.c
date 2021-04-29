@@ -2,17 +2,17 @@
 
 int main() {
 	struct vtk2_block *level2[] = {
-		vtk2_make_box({.margins = (lay_vec4){10, 10, 10, 10}, .size = (lay_vec2){50, 50}}, NULL),
-		vtk2_make_box({.layout_flags = LAY_FILL, .margins = (lay_vec4){10, 10, 10, 10}}, NULL),
-		vtk2_make_box({.margins = (lay_vec4){10, 10, 10, 10}, .size = (lay_vec2){100, 200}}, NULL),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {50, 50}),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {100, 200}),
 		NULL
 	};
 	struct vtk2_block *level1[] = {
-		vtk2_make_box({.box_flags = LAY_ROW, .margins = (lay_vec4){10, 10, 10, 10}}, level2),
-		vtk2_make_box({.layout_flags = LAY_FILL, .margins = (lay_vec4){10, 10, 10, 10}, .size = (lay_vec2){400, 400}}, level2),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .direction = VTK2_COL, .children = level2),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {400, 400}),
 		NULL
 	};
-	struct vtk2_block *root = vtk2_make_box({.box_flags = LAY_COLUMN}, level1);
+	struct vtk2_block *root = vtk2_make_box(.children = level1);
 
 	enum vtk2_err err;
 	struct vtk2_win win;

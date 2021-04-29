@@ -13,9 +13,10 @@
 #ifndef VTK2_H
 #define VTK2_H
 
+#include <math.h>
 #include <stdint.h>
 #include <GLFW/glfw3.h>
-#include "deps/layout/layout.h"
+#include "deps/FlexLayout/src/FlexLayout.h"
 #include "deps/nanovg/src/nanovg.h"
 
 //// Error handling ////
@@ -65,25 +66,41 @@ enum vtk2_err vtk2_window_add_child(struct vtk2_win *win, struct vtk2_block *par
 // Process events and redraws for the specified window until it is closed.
 void vtk2_window_mainloop(struct vtk2_win *win);
 
-// Initialize the given block. Mainly for use from custom container widgets.
-enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block);
+//// Block settings ////
+#define VTK2_BLOCK_SETTINGS \
+	float grow, shrink; \
+	float margins[4]; \
+	float size[2]
+#define VTK2_BLOCK_DEFAULTS \
+	.grow = 0, .shrink = 1, \
+	.margins = {0}, \
+	.size = {NAN, NAN}
+#pragma GCC diagnostic ignored "-Winitializer-overrides"
+
+enum vtk2_direction {
+	VTK2_ROW,
+	VTK2_COL,
+};
+struct vtk2_box_settings {
+	struct vtk2_block **children;
+	enum vtk2_direction direction;
+	VTK2_BLOCK_SETTINGS;
+};
+#define VTK2_BOX_DEFAULTS \
+	.children = NULL, \
+	.direction = VTK2_ROW
+
+#define _vtk2_make(name, ...) _vtk2_make_##name((struct vtk2_##name##_settings){VTK2_BLOCK_DEFAULTS, __VA_ARGS__})
 
 //// Block constructors ////
 // THESE WILL ABORT IF ALLOCATION FAILS - USE ONCE AT PROGRAM START
-struct vtk2_box_settings {
-	uint32_t box_flags;
-	uint32_t layout_flags;
-	lay_vec4 margins;
-	lay_vec2 size;
-};
-struct vtk2_block *vtk2_make_box(struct vtk2_box_settings settings, struct vtk2_block **children);
-#define vtk2_make_box(...) vtk2_make_box((struct vtk2_box_settings)__VA_ARGS__)
+struct vtk2_block *_vtk2_make_box(struct vtk2_box_settings settings);
+#define vtk2_make_box(...) _vtk2_make(box, VTK2_BOX_DEFAULTS, __VA_ARGS__)
 
 //// Type definitions (advanced users only) ////
 struct vtk2_win {
 	// Try not to mess with these directly
 	_Bool damaged; // Does the window need redrawn?
-	lay_context lay;
 	NVGcontext *vg;
 	GLFWwindow *win;
 	struct vtk2_block *focused;
@@ -97,9 +114,10 @@ struct vtk2_win {
 
 struct vtk2_block {
 	// Public-ish fields - prefer constructors over directly accessing these
-	uint32_t flags;
-	lay_vec4 margins;
-	lay_vec2 size;
+	enum vtk2_direction direction;
+	float grow, shrink;
+	float margins[4];
+	float size[2];
 
 	// Only touch this stuff if you're defining custom block types
 	enum vtk2_err (*init)(struct vtk2_block *);
@@ -112,14 +130,14 @@ struct vtk2_block {
 	_Bool (*ev_text)(struct vtk2_block *, unsigned rune);
 
 	// Read-only, avoid using if possible
-	lay_id _id;
+	FlexNodeRef flex;
 	struct vtk2_win *win;
 };
 
 //// Internal block type definitions, don't touch except for language bindings ////
 struct vtk2_b_box {
 	struct vtk2_block base;
-	uint32_t box_flags;
+	enum vtk2_direction direction;
 	struct vtk2_block **children;
 };
 
