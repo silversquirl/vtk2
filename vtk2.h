@@ -114,7 +114,6 @@ struct vtk2_win {
 
 struct vtk2_block {
 	// Public-ish fields - prefer constructors over directly accessing these
-	enum vtk2_direction direction;
 	float grow, shrink;
 	float margins[4];
 	float size[2];
