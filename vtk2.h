@@ -93,8 +93,7 @@ enum vtk2_err vtk2_window_set_root(struct vtk2_win *win, struct vtk2_block *root
 // Process events and redraws for the specified window until it is closed.
 void vtk2_window_mainloop(struct vtk2_win *win);
 
-// Initialize a block.
-// If this function succeeds, the block becomes owned by the window.
+// Initialize a block
 enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block);
 
 enum vtk2_shrink {
@@ -166,7 +165,7 @@ struct vtk2_win {
 
 	// Don't write to these
 	float cx, cy; // Cursor pos
-	unsigned fb_w, fb_h; // Framebuffer size
+	uint32_t fb_w, fb_h; // Framebuffer size
 	float win_w, win_h; // Window size
 	struct vtk2_block *root;
 };

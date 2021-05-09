@@ -4,7 +4,7 @@ int main() {
 	struct vtk2_block *level2[] = {
 		vtk2_make_text(.text = "Hello, world!", .scale = 60),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {50, 50}),
-		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .size = {100, NAN}),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 2, .size = {100, NAN}),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .size = {300, 50}),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {100, 200}),
 		NULL
