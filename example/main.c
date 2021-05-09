@@ -2,9 +2,10 @@
 
 int main() {
 	struct vtk2_block *level2[] = {
-		vtk2_make_box(.margins = {20, 10, 10, 20}, .size = {50, 50}),
-		vtk2_make_box(.margins = {10, 10, 10, 20}, .grow = 1, .size = {100, NAN}),
-		vtk2_make_box(.margins = {10, 10, 0, 20}, .size = {100, 200}),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {50, 50}),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .size = {100, NAN}),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .size = {300, 50}),
+		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {100, 200}),
 		NULL
 	};
 	struct vtk2_block *level1[] = {

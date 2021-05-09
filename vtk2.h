@@ -16,7 +16,6 @@
 #include <math.h>
 #include <stdint.h>
 #include <GLFW/glfw3.h>
-#include "deps/FlexLayout/src/FlexLayout.h"
 #include "deps/nanovg/src/nanovg.h"
 
 //// Error handling ////
@@ -59,28 +58,34 @@ void vtk2_window_deinit(struct vtk2_win *win);
 // If this function succeeds, the block becomes owned by the window.
 enum vtk2_err vtk2_window_set_root(struct vtk2_win *win, struct vtk2_block *root);
 
-// Initialize a block and add it as a child of the specified parent.
-// If this function succeeds, the block becomes owned by the window.
-enum vtk2_err vtk2_window_add_child(struct vtk2_win *win, struct vtk2_block *parent, struct vtk2_block *child);
-
 // Process events and redraws for the specified window until it is closed.
 void vtk2_window_mainloop(struct vtk2_win *win);
 
+// Initialize a block.
+// If this function succeeds, the block becomes owned by the window.
+enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block);
+
+enum vtk2_shrink {
+	VTK2_SHRINK_NONE,
+	VTK2_SHRINK_X,
+	VTK2_SHRINK_Y,
+};
+
+// Recompute block layout based on the provided rect and shrink
+void vtk2_block_layout(struct vtk2_block *block, float rect[4], enum vtk2_shrink shrink);
+
 //// Block settings ////
 #define VTK2_BLOCK_SETTINGS \
-	float grow, shrink; \
+	float grow; \
 	float margins[4]; \
 	float size[2]
 #define VTK2_BLOCK_DEFAULTS \
-	.grow = 0, .shrink = 1, \
+	.grow = 0, \
 	.margins = {0}, \
 	.size = {NAN, NAN}
 #pragma GCC diagnostic ignored "-Winitializer-overrides"
 
-enum vtk2_direction {
-	VTK2_ROW,
-	VTK2_COL,
-};
+enum vtk2_direction { VTK2_ROW, VTK2_COL };
 struct vtk2_box_settings {
 	struct vtk2_block **children;
 	enum vtk2_direction direction;
@@ -114,7 +119,7 @@ struct vtk2_win {
 
 struct vtk2_block {
 	// Public-ish fields - prefer constructors over directly accessing these
-	float grow, shrink;
+	float grow;
 	float margins[4];
 	float size[2];
 
@@ -122,14 +127,15 @@ struct vtk2_block {
 	enum vtk2_err (*init)(struct vtk2_block *);
 	void (*deinit)(struct vtk2_block *);
 	void (*draw)(struct vtk2_block *);
+	void (*layout)(struct vtk2_block *, enum vtk2_shrink shrink);
 	_Bool (*ev_button)(struct vtk2_block *, int button, int action, int mods);
 	_Bool (*ev_enter)(struct vtk2_block *, _Bool entered);
 	_Bool (*ev_key)(struct vtk2_block *, int key, int scancode, int action, int mods);
 	_Bool (*ev_mouse)(struct vtk2_block *, float new_x, float new_y, float old_x, float old_y);
 	_Bool (*ev_text)(struct vtk2_block *, unsigned rune);
 
-	// Read-only, avoid using if possible
-	FlexNodeRef flex;
+	// Read-only
+	float rect[4];
 	struct vtk2_win *win;
 };
 

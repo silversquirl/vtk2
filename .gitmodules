@@ -1,6 +1,3 @@
 [submodule "deps/nanovg"]
 	path = deps/nanovg
 	url = https://github.com/memononen/nanovg
-[submodule "deps/FlexLayout"]
-	path = deps/FlexLayout
-	url = https://github.com/Sleen/FlexLayout

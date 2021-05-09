@@ -6,3 +6,4 @@ example: $(OBJS) ../vtk2.h
 	$(CC) $(LDFLAGS) -o $@ $(OBJS)
 
 ../vtk2.o: ../vtk2.h
+main.o: ../vtk2.h

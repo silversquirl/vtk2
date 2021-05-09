@@ -21,9 +21,12 @@
 #define nvgDelete SPLAT(nvgDelete, NVG_IMPL)
 
 #include "vtk2.h"
-#include "deps/FlexLayout/src/FlexLayout.c"
 #include "deps/nanovg/src/nanovg_gl.h"
 #include "deps/nanovg/src/nanovg.c"
+
+#define UNPACK_4(a) (a)[0], UNPACK_3((a)+1)
+#define UNPACK_3(a) (a)[0], UNPACK_2((a)+1)
+#define UNPACK_2(a) (a)[0], (a)[1]
 
 //// Event handlers ////
 static void _vtk2_ev_button(GLFWwindow *glfw_win, int button, int action, int mods) {
@@ -87,9 +90,7 @@ static void _vtk2_window_draw(struct vtk2_win *win) {
 	float fb_scale = win->win_w / (float)win->fb_w;
 
 	// Calculate block layout
-	if (win->root) {
-		Flex_layout(win->root->flex, win->win_w, win->win_h, fb_scale);
-	}
+	vtk2_block_layout(win->root, (float [4]){0, 0, win->win_w, win->win_h}, VTK2_SHRINK_NONE);
 
 	glViewport(0, 0, win->fb_w, win->fb_h);
 	glClearColor(0, 0, 0, 0);
@@ -178,7 +179,6 @@ enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) 
 static void _vtk2_block_deinit(struct vtk2_block *block) {
 	if (!block) return;
 	if (block->deinit) block->deinit(block);
-	Flex_freeNodeRecursive(block->flex);
 }
 
 void vtk2_window_deinit(struct vtk2_win *win) {
@@ -187,59 +187,16 @@ void vtk2_window_deinit(struct vtk2_win *win) {
 	glfwDestroyWindow(win->win);
 }
 
-static enum vtk2_err _vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block) {
-	block->win = win;
-
-	Flex_setFlexGrow(block->flex, block->grow);
-	Flex_setFlexShrink(block->flex, block->shrink);
-
-	Flex_setMarginTop(block->flex, block->margins[0]);
-	Flex_setMarginRight(block->flex, block->margins[1]);
-	Flex_setMarginBottom(block->flex, block->margins[2]);
-	Flex_setMarginLeft(block->flex, block->margins[3]);
-
-	Flex_setWidth(block->flex, block->size[0]);
-	Flex_setHeight(block->flex, block->size[1]);
-
-	enum vtk2_err err = 0;
-	if (block->init) {
-		err = block->init(block);
-	}
-	return err;
-}
-
 enum vtk2_err vtk2_window_set_root(struct vtk2_win *win, struct vtk2_block *root) {
 	_vtk2_block_deinit(win->root);
 
-	// Create flex node
-	root->flex = Flex_newNode();
-	// FIXME: FlexLayout does not handle malloc failure, and will segfault before this check
-	if (!root->flex) return VTK2_ERR_ALLOC;
-
 	// Initialize root block
-	enum vtk2_err err = _vtk2_block_init(win, root);
+	enum vtk2_err err = vtk2_block_init(win, root);
 	if (err == 0) {
 		win->root = root;
 	}
 
 	return err;
-}
-
-enum vtk2_err vtk2_window_add_child(struct vtk2_win *win, struct vtk2_block *parent, struct vtk2_block *child) {
-	// Create flex node
-	child->flex = Flex_newNode();
-	// FIXME: FlexLayout does not handle malloc failure, and will segfault before this check
-	if (!child->flex) return VTK2_ERR_ALLOC;
-
-	// Initialize the block
-	enum vtk2_err err = _vtk2_block_init(win, child);
-	if (err) {
-		return err;
-	}
-
-	Flex_addChild(parent->flex, child->flex);
-
-	return 0;
 }
 
 //// Main loop ////
@@ -250,18 +207,71 @@ void vtk2_window_mainloop(struct vtk2_win *win) {
 	}
 }
 
+//// Block functions ////
+enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block) {
+	block->win = win;
+
+	enum vtk2_err err = 0;
+	if (block->init) {
+		err = block->init(block);
+	}
+	return err;
+}
+
+static inline float _vtk2_forf(float a, float b) {
+	return isnan(a) ? b : a;
+}
+static void _vtk2_block_constrain(struct vtk2_block *block) {
+	float w = block->rect[2], h = block->rect[3];
+
+	if (block->grow == 0) {
+		w = _vtk2_forf(block->size[0], w);
+		h = _vtk2_forf(block->size[1], h);
+	} else {
+		w = fmaxf(block->size[0], w);
+		h = fmaxf(block->size[1], h);
+	}
+
+	block->rect[2] = fmaxf(0, w);
+	block->rect[3] = fmaxf(0, h);
+}
+
+void vtk2_block_layout(struct vtk2_block *block, float rect[4], enum vtk2_shrink shrink) {
+	if (!block) return;
+
+	// Compute margins
+	float mx = block->margins[0];
+	float my = block->margins[1];
+	float mw = block->margins[2] + mx;
+	float mh = block->margins[3] + my;
+
+	// Set initial rect size
+	block->rect[0] = rect[0] + mx;
+	block->rect[1] = rect[1] + my;
+	block->rect[2] = fmaxf(0, rect[2] - mw);
+	block->rect[3] = fmaxf(0, rect[3] - mh);
+
+	// Compute layout
+	if (block->layout) {
+		block->layout(block, shrink);
+	} else {
+		// Default, very simple sizing algorithm
+		_vtk2_block_constrain(block);
+	}
+}
+
 //// Box block ////
-enum vtk2_err _vtk2_box_init(struct vtk2_block *base) {
+static enum vtk2_err _vtk2_box_init(struct vtk2_block *base) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
-	Flex_setDirection(box->base.flex, (FlexDirection)box->direction);
+
 	for (struct vtk2_block **child = box->children; child && *child; child++) {
-		enum vtk2_err err = vtk2_window_add_child(box->base.win, &box->base, *child);
+		enum vtk2_err err = vtk2_block_init(box->base.win, *child);
 		if (err) return err;
 	}
 	return 0;
 }
 
-void _vtk2_box_deinit(struct vtk2_block *base) {
+static void _vtk2_box_deinit(struct vtk2_block *base) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 	for (struct vtk2_block **child = box->children; child && *child; child++) {
 		if ((*child)->deinit) {
@@ -280,29 +290,23 @@ static uint64_t splitmix64(uint64_t x) {
 }
 #endif
 
-void _vtk2_box_draw(struct vtk2_block *base) {
+static void _vtk2_box_draw(struct vtk2_block *base) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 
 #ifdef VTK2_BOX_DEBUG
 	struct vtk2_win *win = box->base.win;
-	float rect[4] = {
-		Flex_getResultLeft(box->base.flex),
-		Flex_getResultTop(box->base.flex),
-		Flex_getResultWidth(box->base.flex),
-		Flex_getResultHeight(box->base.flex),
-	};
-	uint64_t color = splitmix64((uint64_t)box->base.flex);
+	uint64_t color = splitmix64((uint64_t)&box->base);
 	uint8_t r = (color >> 0) & 0xff;
 	uint8_t g = (color >> 8) & 0xff;
 	uint8_t b = (color >> 16) & 0xff;
-	uint8_t a = (color >> 24) & 0xff;
+	uint8_t a = 100;
 
 	nvgBeginPath(win->vg);
-	nvgRect(win->vg, rect[0], rect[1], rect[2], rect[3]);
+	nvgRect(win->vg, box->base.rect[0], box->base.rect[1], box->base.rect[2], box->base.rect[3]);
 	nvgFillColor(win->vg, nvgRGBA(r, g, b, a));
 	nvgFill(win->vg);
-	nvgStrokeColor(win->vg, nvgRGBA(255, 255, 255, 255));
-	nvgStrokeWidth(win->vg, 3);
+	nvgStrokeColor(win->vg, nvgRGBA(255, 255, 255, 150));
+	nvgStrokeWidth(win->vg, 1);
 	nvgStroke(win->vg);
 #endif
 
@@ -313,12 +317,63 @@ void _vtk2_box_draw(struct vtk2_block *base) {
 	}
 }
 
-struct vtk2_block *_vtk2_box_child(struct vtk2_b_box *box, float x, float y) {
+static inline float _vtk2_block_dimsize(struct vtk2_block *block, int dim) {
+	return block->rect[2 + dim] + block->margins[dim] + block->margins[2 + dim];
+}
+// FIXME: This is O(2^n) on nesting depth. That is bad, and I should feel bad
+static void _vtk2_box_layout(struct vtk2_block *base, enum vtk2_shrink shrink) {
+	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
+
+	int dim = box->direction;
+	enum vtk2_shrink box_shrink = VTK2_SHRINK_X + dim;
+
+	_vtk2_block_constrain(&box->base);
+
+	// Compute minimum sizes
+	float rect[4] = {UNPACK_4(box->base.rect)};
+	float cross = 0, grow_total = 0;
 	for (struct vtk2_block **child = box->children; child && *child; child++) {
-		float x0 = Flex_getResultLeft((*child)->flex);
-		float y0 = Flex_getResultTop((*child)->flex);
-		float x1 = x0 + Flex_getResultWidth((*child)->flex);
-		float y1 = y0 + Flex_getResultHeight((*child)->flex);
+		vtk2_block_layout(*child, rect, box_shrink);
+
+		float csize = _vtk2_block_dimsize(*child, dim);
+		rect[dim] += csize;
+		rect[2 + dim] -= csize;
+
+		cross = fmax(cross, _vtk2_block_dimsize(*child, 1 - dim));
+		grow_total += (*child)->grow;
+	}
+
+	if (shrink == box_shrink) {
+		float *size = &box->base.rect[2 + dim];
+		*size -= fmaxf(0, rect[2 + dim]); // Remove leftover space
+		_vtk2_block_constrain(&box->base);
+	} else {
+		if (shrink != VTK2_SHRINK_NONE) {
+			// Shrink cross size
+			box->base.rect[3 - dim] = fmin(box->base.rect[3 - dim], cross);
+			_vtk2_block_constrain(&box->base);
+		}
+
+		// Divide leftover space
+		float unit = grow_total == 0 ? 0 : rect[2 + dim] / grow_total;
+
+		memcpy(rect, box->base.rect, sizeof rect);
+		for (struct vtk2_block **child = box->children; child && *child; child++) {
+			// Set rect size, allocating extra space based on grow factor
+			rect[2 + dim] = _vtk2_block_dimsize(*child, dim) + unit * (*child)->grow;
+
+			vtk2_block_layout(*child, rect, shrink);
+			rect[dim] += _vtk2_block_dimsize(*child, dim);
+		}
+	}
+}
+
+static struct vtk2_block *_vtk2_box_child(struct vtk2_b_box *box, float x, float y) {
+	for (struct vtk2_block **child = box->children; child && *child; child++) {
+		float x0 = (*child)->rect[0];
+		float y0 = (*child)->rect[1];
+		float x1 = x0 + (*child)->rect[2];
+		float y1 = y0 + (*child)->rect[3];
 
 		if (x0 <= x && x < x1 && y0 <= y && y < y1) {
 			return *child;
@@ -328,7 +383,7 @@ struct vtk2_block *_vtk2_box_child(struct vtk2_b_box *box, float x, float y) {
 	return NULL;
 }
 
-_Bool _vtk2_box_ev_button(struct vtk2_block *base, int button, int action, int mods) {
+static _Bool _vtk2_box_ev_button(struct vtk2_block *base, int button, int action, int mods) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 	struct vtk2_block *child = _vtk2_box_child(box, box->base.win->cx, box->base.win->cy);
 	if (child && child->ev_button) {
@@ -337,7 +392,7 @@ _Bool _vtk2_box_ev_button(struct vtk2_block *base, int button, int action, int m
 	return false;
 }
 
-_Bool _vtk2_box_ev_enter(struct vtk2_block *base, _Bool entered) {
+static _Bool _vtk2_box_ev_enter(struct vtk2_block *base, _Bool entered) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 	struct vtk2_block *child = _vtk2_box_child(box, box->base.win->cx, box->base.win->cy);
 	if (child && child->ev_enter) {
@@ -346,7 +401,7 @@ _Bool _vtk2_box_ev_enter(struct vtk2_block *base, _Bool entered) {
 	return false;
 }
 
-_Bool _vtk2_box_ev_key(struct vtk2_block *base, int key, int scancode, int action, int mods) {
+static _Bool _vtk2_box_ev_key(struct vtk2_block *base, int key, int scancode, int action, int mods) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 	if (!box->base.win->focused) {
 		box->base.win->focused = _vtk2_box_child(box, box->base.win->cx, box->base.win->cy);
@@ -358,7 +413,7 @@ _Bool _vtk2_box_ev_key(struct vtk2_block *base, int key, int scancode, int actio
 	return false;
 }
 
-_Bool _vtk2_box_ev_mouse(struct vtk2_block *base, float new_x, float new_y, float old_x, float old_y) {
+static _Bool _vtk2_box_ev_mouse(struct vtk2_block *base, float new_x, float new_y, float old_x, float old_y) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 	struct vtk2_block *child = _vtk2_box_child(box, new_x, new_y);
 	struct vtk2_block *old_child = _vtk2_box_child(box, old_x, old_y);
@@ -374,7 +429,7 @@ _Bool _vtk2_box_ev_mouse(struct vtk2_block *base, float new_x, float new_y, floa
 	return false;
 }
 
-_Bool _vtk2_box_ev_text(struct vtk2_block *base, unsigned rune) {
+static _Bool _vtk2_box_ev_text(struct vtk2_block *base, unsigned rune) {
 	struct vtk2_b_box *box = fieldParentPtr(struct vtk2_b_box, base, base);
 	if (!box->base.win->focused) {
 		box->base.win->focused = _vtk2_box_child(box, box->base.win->cx, box->base.win->cy);
@@ -386,10 +441,6 @@ _Bool _vtk2_box_ev_text(struct vtk2_block *base, unsigned rune) {
 	return false;
 }
 
-#define unpack_4(a) (a)[0], unpack_3((a)+1)
-#define unpack_3(a) (a)[0], unpack_2((a)+1)
-#define unpack_2(a) (a)[0], (a)[1]
-
 struct vtk2_block *_vtk2_make_box(struct vtk2_box_settings settings) {
 	struct vtk2_b_box *box = malloc(sizeof *box);
 	if (!box) abort();
@@ -398,13 +449,13 @@ struct vtk2_block *_vtk2_make_box(struct vtk2_box_settings settings) {
 		.direction = settings.direction,
 		.base = (struct vtk2_block){
 			.grow = settings.grow,
-			.shrink = settings.shrink,
-			.margins = {unpack_4(settings.margins)},
-			.size = {unpack_2(settings.size)},
+			.margins = {UNPACK_4(settings.margins)},
+			.size = {UNPACK_2(settings.size)},
 
 			.init = _vtk2_box_init,
 			.deinit = _vtk2_box_deinit,
 			.draw = _vtk2_box_draw,
+			.layout = _vtk2_box_layout,
 			.ev_button = _vtk2_box_ev_button,
 			.ev_enter = _vtk2_box_ev_enter,
 			.ev_key = _vtk2_box_ev_key,
