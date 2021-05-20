@@ -504,9 +504,102 @@ struct vtk2_block *_vtk2_make_box(struct vtk2_box_settings settings) {
 	return &box->base;
 }
 
-//// Text block ////
 const char aileron_data[];
 const size_t aileron_size;
+//// Static text block ////
+static enum vtk2_err _vtk2_static_text_init(struct vtk2_block *base) {
+	struct vtk2_b_static_text *text = fieldParentPtr(struct vtk2_b_static_text, base, base);
+
+	const char *font_name, *font_data = NULL;
+	size_t data_size;
+	if (text->font_file) {
+		font_name = text->font_file;
+		if (text->font_data) {
+			font_data = text->font_data;
+			data_size = text->data_size;
+		}
+	} else {
+		font_name = "\xff_vtk2_font_aileron";
+		font_data = aileron_data;
+		data_size = aileron_size;
+	}
+
+	NVGcontext *vg = text->base.win->vg;
+	text->font_handle = nvgFindFont(vg, font_name);
+	if (text->font_handle == -1) {
+		if (font_data) {
+			text->font_handle = nvgCreateFontMem(vg, font_name, (unsigned char *)font_data, data_size, 0);
+		} else {
+			text->font_handle = nvgCreateFont(vg, font_name, font_name);
+		}
+		if (text->font_handle == -1) {
+			return VTK2_ERR_LOAD_FAILED;
+		}
+	}
+
+	return 0;
+}
+
+static void _vtk2_static_text_layout(struct vtk2_block *base, enum vtk2_shrink shrink) {
+	struct vtk2_b_static_text *text = fieldParentPtr(struct vtk2_b_static_text, base, base);
+	NVGcontext *vg = text->base.win->vg;
+
+	nvgFontFaceId(vg, text->font_handle);
+	nvgFontSize(vg, text->font_size);
+
+	float ascend;
+	nvgTextMetrics(vg, &ascend, NULL, NULL);
+
+	float rect[4];
+	nvgTextBounds(vg, text->base.rect[0], text->base.rect[1] + ascend, text->text, NULL, rect);
+
+	text->base.rect[2] = rect[2] - rect[0];
+	text->base.rect[3] = rect[3] - rect[1];
+
+	_vtk2_block_constrain(&text->base);
+}
+
+static void _vtk2_static_text_draw(struct vtk2_block *base) {
+	struct vtk2_b_static_text *text = fieldParentPtr(struct vtk2_b_static_text, base, base);
+
+	NVGcontext *vg = text->base.win->vg;
+	nvgFontFaceId(vg, text->font_handle);
+	nvgFontSize(vg, text->font_size);
+	nvgFillColor(vg, nvgRGBAf(UNPACK_4(text->font_color)));
+
+	float ascend;
+	nvgTextMetrics(vg, &ascend, NULL, NULL);
+
+	nvgText(vg, text->base.rect[0], text->base.rect[1] + ascend, text->text, NULL);
+}
+
+struct vtk2_block *_vtk2_make_static_text(struct vtk2_static_text_settings settings) {
+	struct vtk2_b_static_text *text = malloc(sizeof *text);
+	if (!text) abort();
+	*text = (struct vtk2_b_static_text){
+		.text = settings.text,
+		.font_size = settings.font_size,
+		.font_color = {UNPACK_4(settings.font_color)},
+
+		.font_file = settings.font_file,
+		.font_data = settings.font_data,
+		.data_size = settings.data_size,
+		.font_handle = -1,
+
+		.base = (struct vtk2_block){
+			.grow = settings.grow,
+			.margins = {UNPACK_4(settings.margins)},
+			.size = {UNPACK_2(settings.size)},
+
+			.init = _vtk2_static_text_init,
+			.draw = _vtk2_static_text_draw,
+			.layout = _vtk2_static_text_layout,
+		},
+	};
+	return &text->base;
+}
+
+//// Text block ////
 static enum vtk2_err _vtk2_text_init(struct vtk2_block *base) {
 	struct vtk2_b_text *text = fieldParentPtr(struct vtk2_b_text, base, base);
 
@@ -545,13 +638,17 @@ static void _vtk2_text_layout(struct vtk2_block *base, enum vtk2_shrink shrink) 
 	NVGcontext *vg = text->base.win->vg;
 
 	nvgFontFaceId(vg, text->font_handle);
-	nvgFontSize(vg, text->scale);
+	nvgFontSize(vg, text->font_size);
 
 	float ascend;
 	nvgTextMetrics(vg, &ascend, NULL, NULL);
 
+	size_t len = SIZE_MAX;
+	const char *str = text->text_fn(&len, text->data);
+	const char *end = (len == SIZE_MAX) ? NULL : str + len;
+
 	float rect[4];
-	nvgTextBounds(vg, text->base.rect[0], text->base.rect[1] + ascend, text->text, NULL, rect);
+	nvgTextBounds(vg, text->base.rect[0], text->base.rect[1] + ascend, str, end, rect);
 
 	text->base.rect[2] = rect[2] - rect[0];
 	text->base.rect[3] = rect[3] - rect[1];
@@ -564,23 +661,28 @@ static void _vtk2_text_draw(struct vtk2_block *base) {
 
 	NVGcontext *vg = text->base.win->vg;
 	nvgFontFaceId(vg, text->font_handle);
-	nvgFontSize(vg, text->scale);
-	nvgFillColor(vg, nvgRGBAf(UNPACK_4(text->color)));
+	nvgFontSize(vg, text->font_size);
+	nvgFillColor(vg, nvgRGBAf(UNPACK_4(text->font_color)));
 
 	float ascend;
 	nvgTextMetrics(vg, &ascend, NULL, NULL);
 
-	nvgText(vg, text->base.rect[0], text->base.rect[1] + ascend, text->text, NULL);
+	size_t len = SIZE_MAX;
+	const char *str = text->text_fn(&len, text->data);
+	const char *end = (len == SIZE_MAX) ? NULL : str + len;
+
+	nvgText(vg, text->base.rect[0], text->base.rect[1] + ascend, str, end);
 }
 
 struct vtk2_block *_vtk2_make_text(struct vtk2_text_settings settings) {
 	struct vtk2_b_text *text = malloc(sizeof *text);
 	if (!text) abort();
 	*text = (struct vtk2_b_text){
-		.text = settings.text,
-		.scale = settings.scale,
-		.color = {UNPACK_4(settings.color)},
+		.text_fn = settings.text_fn,
+		.data = settings.data,
 
+		.font_size = settings.font_size,
+		.font_color = {UNPACK_4(settings.font_color)},
 		.font_file = settings.font_file,
 		.font_data = settings.font_data,
 		.data_size = settings.data_size,

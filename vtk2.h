@@ -122,6 +122,23 @@ void vtk2_block_layout(struct vtk2_block *block, float rect[4], enum vtk2_shrink
 #pragma GCC diagnostic ignored "-Winitializer-overrides"
 #define _vtk2_make(name, ...) _vtk2_make_##name((struct vtk2_##name##_settings){VTK2_BLOCK_DEFAULTS, __VA_ARGS__})
 
+// Common options for all text-rendering blocks
+#define VTK2_FONT_SETTINGS \
+	float font_size; \
+	float font_color[4]; \
+    /* If both font_file and font_data are NULL, a trimmed version of Aileron Regular will be used
+	 * If font_data is set, font_file will not be used, but *must still be set* to a string unique to that font
+     */ \
+	const char *font_file; /* Filename of font to use */ \
+	const char *font_data; /* In-memory font to use */ \
+	size_t data_size /* Length of font_data */
+#define VTK2_FONT_DEFAULTS \
+	.font_size = 14, \
+	.font_color = {1, 1, 1, 1}, \
+	.font_file = NULL, \
+	.font_data = NULL, \
+	.data_size = 0
+
 enum vtk2_direction { VTK2_ROW, VTK2_COL };
 struct vtk2_box_settings {
 	struct vtk2_block **children;
@@ -132,31 +149,37 @@ struct vtk2_box_settings {
 	.children = NULL, \
 	.direction = VTK2_ROW
 
-struct vtk2_text_settings {
+struct vtk2_static_text_settings {
 	const char *text; // Text to display
-	float scale;
-	float color[4];
 
-	// If both font_file and font_data are NULL, a trimmed version of Aileron Regular will be used
-	// If font_data is set, font_file will not be used, but *must still be set* to a string unique to that font
-	const char *font_file; // Filename of font to use
-	const char *font_data; // In-memory font to use
-	size_t data_size; // Length of font_data
+	VTK2_FONT_SETTINGS;
+	VTK2_BLOCK_SETTINGS;
+};
+#define VTK2_STATIC_TEXT_DEFAULTS \
+	.text = "", \
+	VTK2_FONT_DEFAULTS
 
+struct vtk2_text_settings {
+	// This function is called to determine the text to render
+	// If the value returned through len is SIZE_MAX (which is the default), the string is assumed to be null-terminated
+	// This function will be called multiple times per frame, so it may be advisable to implement some form of caching
+	const char *(*text_fn)(size_t *len, void *data);
+	void *data;
+
+	VTK2_FONT_SETTINGS;
 	VTK2_BLOCK_SETTINGS;
 };
 #define VTK2_TEXT_DEFAULTS \
-	.text = "", \
-	.scale = 14, \
-	.color = {1, 1, 1, 1}, \
-	.font_file = NULL, \
-	.font_data = NULL, \
-	.data_size = 0
+	.text_fn = NULL, \
+	.data = NULL, \
+	VTK2_FONT_DEFAULTS
 
 //// Block constructors ////
 // THESE WILL ABORT IF ALLOCATION FAILS - USE ONCE AT PROGRAM START
 struct vtk2_block *_vtk2_make_box(struct vtk2_box_settings settings);
 #define vtk2_make_box(...) _vtk2_make(box, VTK2_BOX_DEFAULTS, __VA_ARGS__)
+struct vtk2_block *_vtk2_make_static_text(struct vtk2_static_text_settings settings);
+#define vtk2_make_static_text(...) _vtk2_make(static_text, VTK2_STATIC_TEXT_DEFAULTS, __VA_ARGS__)
 struct vtk2_block *_vtk2_make_text(struct vtk2_text_settings settings);
 #define vtk2_make_text(...) _vtk2_make(text, VTK2_TEXT_DEFAULTS, __VA_ARGS__)
 
@@ -204,16 +227,19 @@ struct vtk2_b_box {
 	struct vtk2_block **children;
 };
 
+struct vtk2_b_static_text {
+	struct vtk2_block base;
+	const char *text;
+	VTK2_FONT_SETTINGS;
+
+	int font_handle;
+};
+
 struct vtk2_b_text {
 	struct vtk2_block base;
-
-	const char *text;
-	float scale;
-	float color[4];
-
-	const char *font_file;
-	const char *font_data;
-	size_t data_size;
+	const char *(*text_fn)(size_t *len, void *data);
+	void *data;
+	VTK2_FONT_SETTINGS;
 
 	int font_handle;
 };

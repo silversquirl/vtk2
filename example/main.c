@@ -14,14 +14,24 @@ int worker(void *data_p) {
 		struct timespec ts = {.tv_sec = 1};
 		while (thrd_sleep(&ts, &ts) == -1);
 		data->x++;
-		printf("%d\n", data->x);
 		vtk2_window_redraw(data->win);
 	}
 }
 
+const char *timestamp(size_t *len, void *data_p) {
+	struct worker_data *data = data_p;
+	static char buf[1024];
+	int n = snprintf(buf, sizeof buf, "This example program has been running for %d seconds", data->x);
+	if (n < 0) return "!! error occurred in string generation !!";
+	*len = n;
+	return buf;
+}
+
 int main() {
+	struct worker_data data = {0};
+
 	struct vtk2_block *level2[] = {
-		vtk2_make_text(.text = "Hello, world!", .scale = 60),
+		vtk2_make_static_text(.text = "Hello, world!", .font_size = 60),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {50, 50}),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 2, .size = {100, NAN}),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .size = {300, 50}),
@@ -31,7 +41,7 @@ int main() {
 	struct vtk2_block *level1[] = {
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .grow = 1, .direction = VTK2_COL, .children = level2),
 		vtk2_make_box(.margins = {10, 10, 10, 10}, .size = {400, 400}),
-		vtk2_make_text(.text = "This is an example program", .color = {0, 1, 0, 1}, .margins = {10, 10, 10, 10}),
+		vtk2_make_text(.text_fn = timestamp, .data = &data, .font_color = {0, 1, 0, 1}, .margins = {10, 10, 10, 10}),
 		NULL
 	};
 	struct vtk2_block *root = vtk2_make_box(.children = level1);
@@ -47,10 +57,7 @@ int main() {
 		return 1;
 	}
 
-	struct worker_data data = {
-		.x = 0,
-		.win = &win,
-	};
+	data.win = &win;
 	thrd_t thr;
 	int thr_err = thrd_create(&thr, worker, &data);
 	if (thr_err != thrd_success) {
