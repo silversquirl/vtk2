@@ -29,6 +29,7 @@
 // vtk2 embeds a modified version of Aileron Regular, created by Sora Sagano
 // http://dotcolon.net/font/aileron/
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdio.h>
 
@@ -68,7 +69,7 @@ static void _vtk2_ev_button(GLFWwindow *glfw_win, int button, int action, int mo
 }
 static void _vtk2_ev_damage(GLFWwindow *glfw_win) {
 	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
-	win->damaged = 1;
+	atomic_flag_clear_explicit(&win->clean, memory_order_release);
 }
 static void _vtk2_ev_enter(GLFWwindow *glfw_win, int entered) {
 	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
@@ -94,7 +95,7 @@ static void _vtk2_ev_resize(GLFWwindow *glfw_win, int fb_w, int fb_h) {
 	struct vtk2_win *win = glfwGetWindowUserPointer(glfw_win);
 
 	// Damage window
-	win->damaged = 1;
+	atomic_flag_clear_explicit(&win->clean, memory_order_release);
 
 	// Store framebuffer dimensions
 	win->fb_w = fb_w;
@@ -115,8 +116,7 @@ static void _vtk2_ev_text(GLFWwindow *glfw_win, unsigned rune) {
 
 //// Drawing ////
 static void _vtk2_window_draw(struct vtk2_win *win) {
-	if (!win->damaged) return;
-	win->damaged = 0;
+	if (atomic_flag_test_and_set_explicit(&win->clean, memory_order_acquire)) return;
 
 	float fb_scale = win->win_w / (float)win->fb_w;
 
@@ -176,7 +176,7 @@ enum vtk2_err vtk2_window_init(struct vtk2_win *win, const char *title, int w, i
 
 enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) {
 	// Start damaged, since we've not drawn anything yet
-	win->damaged = 1;
+	win->clean = (atomic_flag)ATOMIC_FLAG_INIT;
 
 	// Setup window
 	win->win = glfw_win;
@@ -238,6 +238,11 @@ void vtk2_window_mainloop(struct vtk2_win *win) {
 		_vtk2_window_draw(win);
 		glfwWaitEvents();
 	}
+}
+
+void vtk2_window_redraw(struct vtk2_win *win) {
+	atomic_flag_clear_explicit(&win->clean, memory_order_release);
+	glfwPostEmptyEvent();
 }
 
 //// Block functions ////

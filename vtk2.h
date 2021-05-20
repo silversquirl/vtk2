@@ -45,6 +45,7 @@
 #define VTK2_H
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <GLFW/glfw3.h>
 #include "deps/nanovg/src/nanovg.h"
@@ -92,6 +93,10 @@ enum vtk2_err vtk2_window_set_root(struct vtk2_win *win, struct vtk2_block *root
 
 // Process events and redraws for the specified window until it is closed.
 void vtk2_window_mainloop(struct vtk2_win *win);
+
+// Force an immediate redraw of the specified window.
+// May be called concurrently.
+void vtk2_window_redraw(struct vtk2_win *win);
 
 // Initialize a block
 enum vtk2_err vtk2_block_init(struct vtk2_win *win, struct vtk2_block *block);
@@ -158,7 +163,7 @@ struct vtk2_block *_vtk2_make_text(struct vtk2_text_settings settings);
 //// Type definitions (advanced users only) ////
 struct vtk2_win {
 	// Try not to mess with these directly
-	_Bool damaged; // Does the window need redrawn?
+	atomic_flag clean; // Clear if the window must be redrawn
 	NVGcontext *vg;
 	GLFWwindow *win;
 	struct vtk2_block *focused;

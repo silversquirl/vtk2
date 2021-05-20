@@ -1,4 +1,23 @@
+#include <stdatomic.h>
+#include <stdio.h>
+#include <threads.h>
 #include "../vtk2.h"
+
+struct worker_data {
+	atomic_int x;
+	struct vtk2_win *win;
+};
+
+int worker(void *data_p) {
+	struct worker_data *data = data_p;
+	for (;;) {
+		struct timespec ts = {.tv_sec = 1};
+		while (thrd_sleep(&ts, &ts) == -1);
+		data->x++;
+		printf("%d\n", data->x);
+		vtk2_window_redraw(data->win);
+	}
+}
 
 int main() {
 	struct vtk2_block *level2[] = {
@@ -25,6 +44,19 @@ int main() {
 	};
 	if ((err = vtk2_window_set_root(&win, root))) {
 		vtk2_perror("error setting root element", err);
+		return 1;
+	}
+
+	struct worker_data data = {
+		.x = 0,
+		.win = &win,
+	};
+	thrd_t thr;
+	int thr_err = thrd_create(&thr, worker, &data);
+	if (thr_err != thrd_success) {
+		fprintf(stderr, "thread error: %d\n", thr_err);
+		vtk2_window_deinit(&win);
+		glfwTerminate();
 		return 1;
 	}
 
