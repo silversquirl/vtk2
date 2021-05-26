@@ -194,6 +194,7 @@ enum vtk2_err vtk2_window_init_glfw(struct vtk2_win *win, GLFWwindow *glfw_win) 
 	win->root = win->focused = NULL;
 
 	// Set up event handlers
+	glfwSetCharCallback(win->win, _vtk2_ev_text);
 	glfwSetCursorEnterCallback(win->win, _vtk2_ev_enter);
 	glfwSetCursorPosCallback(win->win, _vtk2_ev_mouse);
 	glfwSetFramebufferSizeCallback(win->win, _vtk2_ev_resize);
